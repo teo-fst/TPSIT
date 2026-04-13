@@ -14,29 +14,29 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 ### Divisione in gruppi
 
 - #### Interfaccia
-- Audagna
-- Lata
-- .
+  - Audagna
+  - Lata
+  - .
 
 - #### Progettazione 3D
-- Formento
-- Cordone
-- Collalto
+  - Formento
+  - Roncone
+  - Collalto
 
 - #### Progettazione Hardware
-- Musolino
-- Cordeglio
-- Maurizio
-- Coppola
+  - Musolino
+  - Cordeglio
+  - Maurizio
+  - Coppola
 
 - #### Arduino <-> Esp
-- .
-- .
+  - .
+  - .
 
 - #### Programmazione
-- Novello
-- Guasco
-- .
+  - Novello
+  - Guasco
+  - .
 
 - #### Motori + driver
-- Tutta la classe
+  - Tutta la classe
