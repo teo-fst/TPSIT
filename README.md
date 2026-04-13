@@ -12,3 +12,31 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 - Il tocco degli studenti: Ogni pezzo è stato assemblato mettendo in pratica le competenze di progettazione tecnica e prototipazione apprese in classe
 
 ### Divisione in gruppi
+
+- #### Interfaccia
+- Audagna
+- Lata
+- .
+
+- #### Progettazione 3D
+- Formento
+- Cordone
+- Collalto
+
+- #### Progettazione Hardware
+- Musolino
+- Cordeglio
+- Maurizio
+- Coppola
+
+- #### Arduino <-> Esp
+- .
+- .
+
+- #### Programmazione
+- Novello
+- Guasco
+- .
+
+- #### Motori + driver
+- Tutta la classe
