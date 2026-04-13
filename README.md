@@ -15,7 +15,7 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 
 - #### Interfaccia
   - .
-  - Lata
+  - .
   - .
 
 - #### Progettazione 3D
@@ -26,7 +26,7 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 - #### Progettazione Hardware
   - Musolino
   - Cordeglio
-  - .
+  - Lata
   - Coppola
 
 - #### Arduino <-> Esp
