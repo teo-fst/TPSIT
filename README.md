@@ -14,7 +14,7 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 ### Divisione in gruppi
 
 - #### Interfaccia
-  - Audagna
+  - .
   - Lata
   - .
 
@@ -26,17 +26,17 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 - #### Progettazione Hardware
   - Musolino
   - Cordeglio
-  - Maurizio
+  - .
   - Coppola
 
 - #### Arduino <-> Esp
-  - .
+  - Audagna
   - .
 
 - #### Programmazione
   - Novello
   - Guasco
-  - .
+  - Maurizio
 
 - #### Motori + driver
   - Tutta la classe
