@@ -14,9 +14,9 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 ### Divisione in gruppi
 
 - #### Interfaccia
-  - .
-  - .
-  - .
+  - Gesso
+  - Tafili
+  - Cela
 
 - #### Progettazione 3D
   - Formento
@@ -31,7 +31,7 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 
 - #### Arduino <-> Esp
   - Audagna
-  - .
+  - Lavezzi
 
 - #### Programmazione
   - Novello
