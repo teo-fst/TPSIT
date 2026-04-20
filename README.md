@@ -26,7 +26,6 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 - #### Progettazione Hardware
   - Musolino
   - Cordeglio
-  - Maurizio
   - Coppola
 
 - #### Arduino <-> Esp
@@ -36,7 +35,7 @@ Nato dall’ingegno e dalla collaborazione degli studenti del 3° anno, questo d
 - #### Programmazione
   - Novello
   - Guasco
-  - .
+  - Maurizio
 
 - #### Motori + driver
   - Tutta la classe
