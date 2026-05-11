@@ -1,5 +1,331 @@
 //programmazione 
 
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
+
+// --- DEFINIZIONE PIN ---
+const int PIN_STEP = 3;
+const int PIN_DIR = 4;
+const int PIN_EN = 5;
+
+const int PIN_VALVOLA_ACQUA = 6;
+const int PIN_SENS_ACQUA_CIOTOLA = 7;
+const int PIN_SENS_ACQUA_SERBATOIO = 8;
+
+const int PIN_TRIG_CIOTOLA = 9;
+const int PIN_ECHO_CIOTOLA = 10;
+const int PIN_TRIG_SERBATOIO = 11;
+const int PIN_ECHO_SERBATOIO = 12;
+
+const int BTN_HOME = 22;
+const int BTN_MENU = 23;
+const int BTN_SU = 24;
+const int BTN_GIU = 25;
+const int BTN_CONFIRM = 26;
+const int BTN_BACK = 27;
+
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+// --- COSTANTI SENSORI E MOTORE ---
+const int PASSI_PER_DOSE = 2000; 
+const int DISTANZA_CIOTOLA_VUOTA = 15; // cm
+const int ALTEZZA_SERBATOIO_CIBO = 40; // cm 
+const int CIBO_PIENO = 5;              // cm
+
+// --- GESTIONE DEL TEMPO (TRUCCO PER IL TEST) ---
+// Per il test: 1 "Ora" impostata nel menu = 5 secondi (5000 millisecondi)
+// QUANDO LO MONTI VERO, CAMBIA 5000UL con 3600000UL
+const unsigned long MOLTIPLICATORE_TEMPO = 5000UL; 
+
+unsigned long tempoProssimoControlloCibo = 0;
+const unsigned long RITARDO_CIOTOLA_PIENA = 3000; // Riprova dopo 3 sec se la ciotola è piena
+
+int dosiDaErogare = 1;
+int oreIntervallo = 2; // Default
+int percentualeCibo = 100;
+bool vistaAcquaHome = false;
+
+// --- STATI MENU E SCHERMO ---
+enum StatiMenu { HOME, MENU_PRINCIPALE, MENU_SET_DOSI, MENU_SET_TIMER, MENU_MANUALE, MENU_DEBUG };
+StatiMenu statoAttuale = HOME;
+int cursoreMenu = 1;
+bool aggiornaSchermo = true;
+bool forzaClear = true; // Usata per pulire lo schermo in modo intelligente
+
+// --- DEBOUNCE PULSANTI ---
+unsigned long ultimoPremuto = 0;
+const int RITARDO_DEBOUNCE = 200;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(PIN_STEP, OUTPUT); pinMode(PIN_DIR, OUTPUT); pinMode(PIN_EN, OUTPUT);
+  digitalWrite(PIN_EN, HIGH); // Driver spento
+
+  pinMode(PIN_VALVOLA_ACQUA, OUTPUT);
+  pinMode(PIN_SENS_ACQUA_CIOTOLA, INPUT_PULLUP); 
+  pinMode(PIN_SENS_ACQUA_SERBATOIO, INPUT_PULLUP);
+
+  pinMode(PIN_TRIG_CIOTOLA, OUTPUT); pinMode(PIN_ECHO_CIOTOLA, INPUT);
+  pinMode(PIN_TRIG_SERBATOIO, OUTPUT); pinMode(PIN_ECHO_SERBATOIO, INPUT);
+
+  pinMode(BTN_HOME, INPUT_PULLUP); pinMode(BTN_MENU, INPUT_PULLUP);
+  pinMode(BTN_SU, INPUT_PULLUP); pinMode(BTN_GIU, INPUT_PULLUP);
+  pinMode(BTN_CONFIRM, INPUT_PULLUP); pinMode(BTN_BACK, INPUT_PULLUP);
+
+  lcd.init(); lcd.backlight();
+
+  int dosiSalvate, oreSalvate;
+  EEPROM.get(0, dosiSalvate);
+  EEPROM.get(sizeof(int), oreSalvate);
+  
+  if (dosiSalvate >= 1 && dosiSalvate <= 10) dosiDaErogare = dosiSalvate;
+  if (oreSalvate >= 1 && oreSalvate <= 24) oreIntervallo = oreSalvate;
+
+  impostaNuovoTimerCibo();
+}
+
+void loop() {
+  leggiPulsanti();
+  gestisciAcqua();
+  gestisciCiboAutomatico();
+  calcolaPercentualeCibo();
+
+  // Aggiorna i dati su schermo ogni secondo se in Home, o ogni mezzo sec se nel Debug
+  static unsigned long ultimoAggiornamentoHome = 0;
+  if (statoAttuale == HOME && (millis() - ultimoAggiornamentoHome > 1000)) {
+    aggiornaSchermo = true;
+    ultimoAggiornamentoHome = millis();
+  }
+  
+  if (statoAttuale == MENU_DEBUG && (millis() - ultimoAggiornamentoHome > 500)) {
+    aggiornaSchermo = true;
+    ultimoAggiornamentoHome = millis();
+  }
+
+  if (aggiornaSchermo) {
+    disegnaInterfaccia();
+    aggiornaSchermo = false;
+  }
+}
+
+// --- FUNZIONI LOGICHE E SENSORI ---
+
+void impostaNuovoTimerCibo() {
+  unsigned long msIntervallo = (unsigned long)oreIntervallo * MOLTIPLICATORE_TEMPO; 
+  tempoProssimoControlloCibo = millis() + msIntervallo;
+}
+
+float leggiSonar(int pinTrig, int pinEcho) {
+  digitalWrite(pinTrig, LOW); delayMicroseconds(2);
+  digitalWrite(pinTrig, HIGH); delayMicroseconds(10);
+  digitalWrite(pinTrig, LOW);
+  long durata = pulseIn(pinEcho, HIGH, 50000); 
+  if (durata == 0) return 999.0; 
+  return (durata * 0.0343) / 2.0;
+}
+
+void calcolaPercentualeCibo() {
+  static unsigned long ultimoControllo = 0;
+  if (millis() - ultimoControllo > 2000) {
+    float dist = leggiSonar(PIN_TRIG_SERBATOIO, PIN_ECHO_SERBATOIO);
+    int nuovaPerc = map(dist, ALTEZZA_SERBATOIO_CIBO, CIBO_PIENO, 0, 100);
+    nuovaPerc = constrain(nuovaPerc, 0, 100);
+    if (nuovaPerc != percentualeCibo) { percentualeCibo = nuovaPerc; aggiornaSchermo = true; }
+    ultimoControllo = millis();
+  }
+}
+
+// --- FUNZIONI ATTUATORI ---
+
+void erogaCibo(int numeroDosi) {
+  lcd.clear();
+  lcd.setCursor(0, 1);
+  lcd.print("EROGAZIONE IN CORSO!");
+  
+  digitalWrite(PIN_EN, LOW); 
+  delay(50);                 
+  digitalWrite(PIN_DIR, HIGH); 
+
+  long passiTotali = (long)numeroDosi * PASSI_PER_DOSE;
+  
+  for (long i = 0; i < passiTotali; i++) {
+    digitalWrite(PIN_STEP, HIGH);
+    delay(1); 
+    digitalWrite(PIN_STEP, LOW);
+    delay(1);
+  }
+  
+  digitalWrite(PIN_EN, HIGH); 
+  impostaNuovoTimerCibo(); 
+  
+  // Impone di pulire lo schermo al ritorno alla Home
+  forzaClear = true; 
+  aggiornaSchermo = true;
+}
+
+void gestisciAcqua() {
+  static bool sCiotolaPrec = false, sSerbatoioPrec = false;
+  bool ciotolaVuota = digitalRead(PIN_SENS_ACQUA_CIOTOLA); 
+  bool serbatoioVuoto = digitalRead(PIN_SENS_ACQUA_SERBATOIO);
+
+  if (ciotolaVuota == HIGH && serbatoioVuoto == LOW) digitalWrite(PIN_VALVOLA_ACQUA, HIGH);
+  else digitalWrite(PIN_VALVOLA_ACQUA, LOW);
+
+  if(ciotolaVuota != sCiotolaPrec || serbatoioVuoto != sSerbatoioPrec) {
+    sCiotolaPrec = ciotolaVuota; sSerbatoioPrec = serbatoioVuoto; aggiornaSchermo = true;
+  }
+}
+
+void gestisciCiboAutomatico() {
+  if (millis() >= tempoProssimoControlloCibo) {
+    float distanzaCiotola = leggiSonar(PIN_TRIG_CIOTOLA, PIN_ECHO_CIOTOLA);
+    
+    if (distanzaCiotola >= DISTANZA_CIOTOLA_VUOTA) {
+      erogaCibo(dosiDaErogare);
+    } else {
+      tempoProssimoControlloCibo = millis() + RITARDO_CIOTOLA_PIENA; 
+      aggiornaSchermo = true;
+    }
+  }
+}
+
+// --- INTERFACCIA E PULSANTI ---
+
+bool tastoPremuto(int pin) {
+  if (digitalRead(pin) == LOW) { 
+    if (millis() - ultimoPremuto > RITARDO_DEBOUNCE) {
+      ultimoPremuto = millis(); return true;
+    }
+  }
+  return false;
+}
+
+void leggiPulsanti() {
+  if (tastoPremuto(BTN_HOME)) { statoAttuale = HOME; aggiornaSchermo = true; }
+  if (tastoPremuto(BTN_MENU)) { statoAttuale = MENU_PRINCIPALE; cursoreMenu = 1; aggiornaSchermo = true; }
+
+  switch (statoAttuale) {
+    case HOME:
+      if (tastoPremuto(BTN_SU) || tastoPremuto(BTN_GIU)) { vistaAcquaHome = !vistaAcquaHome; aggiornaSchermo = true; }
+      break;
+    case MENU_PRINCIPALE:
+      if (tastoPremuto(BTN_GIU)) { cursoreMenu++; if (cursoreMenu > 4) cursoreMenu = 1; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_SU)) { cursoreMenu--; if (cursoreMenu < 1) cursoreMenu = 4; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_CONFIRM)) {
+        if (cursoreMenu == 1) statoAttuale = MENU_SET_DOSI;
+        if (cursoreMenu == 2) statoAttuale = MENU_SET_TIMER;
+        if (cursoreMenu == 3) statoAttuale = MENU_MANUALE;
+        if (cursoreMenu == 4) statoAttuale = MENU_DEBUG;
+        aggiornaSchermo = true;
+      }
+      break;
+    case MENU_SET_DOSI:
+      if (tastoPremuto(BTN_SU)) { dosiDaErogare++; if(dosiDaErogare > 10) dosiDaErogare = 10; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_GIU)) { dosiDaErogare--; if(dosiDaErogare < 1) dosiDaErogare = 1; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_CONFIRM)) { EEPROM.put(0, dosiDaErogare); statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_BACK)) { statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; }
+      break;
+    case MENU_SET_TIMER:
+      if (tastoPremuto(BTN_SU)) { oreIntervallo++; if(oreIntervallo > 24) oreIntervallo = 24; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_GIU)) { oreIntervallo--; if(oreIntervallo < 1) oreIntervallo = 1; aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_CONFIRM)) { 
+        EEPROM.put(sizeof(int), oreIntervallo); 
+        impostaNuovoTimerCibo(); 
+        statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; 
+      }
+      if (tastoPremuto(BTN_BACK)) { statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; }
+      break;
+    case MENU_MANUALE:
+      if (tastoPremuto(BTN_SU)) { erogaCibo(1); aggiornaSchermo = true; }
+      if (tastoPremuto(BTN_BACK)) { statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; }
+      break;
+    case MENU_DEBUG:
+      if (tastoPremuto(BTN_BACK)) { statoAttuale = MENU_PRINCIPALE; aggiornaSchermo = true; }
+      break;
+  }
+}
+
+void disegnaInterfaccia() {
+  static StatiMenu statoPrec = (StatiMenu)-1;
+  static bool vistaAcquaPrec = false;
+  
+  // Eseguiamo lcd.clear() SOLO se c'è un reale cambio di pagina o forzatura
+  if (forzaClear || statoAttuale != statoPrec || (statoAttuale == HOME && vistaAcquaHome != vistaAcquaPrec)) {
+    lcd.clear();
+    statoPrec = statoAttuale;
+    vistaAcquaPrec = vistaAcquaHome;
+    forzaClear = false;
+  }
+  
+  // Da qui in poi sovrascriviamo il testo in modo fluido (senza sfarfallio)
+  if (statoAttuale == HOME) {
+    if (!vistaAcquaHome) {
+      lcd.setCursor(0, 0); lcd.print("[STATO CIBO]    (v)");
+      
+      lcd.setCursor(0, 1); lcd.print("Rimasto: "); 
+      lcd.print(percentualeCibo); lcd.print("%   "); // Spazi per cancellare caratteri vecchi
+      
+      long secMancanti = (tempoProssimoControlloCibo - millis()) / 1000;
+      if (secMancanti < 0) secMancanti = 0;
+      
+      lcd.setCursor(0, 2); lcd.print("Check tra: "); 
+      lcd.print(secMancanti); lcd.print("s   ");
+      
+      lcd.setCursor(0, 3);
+      if (percentualeCibo <= 15) lcd.print("! MANCA CIBO !      ");
+      else lcd.print("Sistema Regolare    ");
+    } else {
+      lcd.setCursor(0, 0); lcd.print("[STATO ACQUA]   (^)");
+      
+      lcd.setCursor(0, 1); lcd.print("Ciotola: ");
+      lcd.print(digitalRead(PIN_SENS_ACQUA_CIOTOLA) ? "VUOTA/USO  " : "PIENA      ");
+      
+      lcd.setCursor(0, 2); lcd.print("Serbat.: ");
+      lcd.print(digitalRead(PIN_SENS_ACQUA_SERBATOIO) ? "VUOTO      " : "PIENO      ");
+      
+      lcd.setCursor(0, 3);
+      if (digitalRead(PIN_SENS_ACQUA_SERBATOIO) == HIGH) lcd.print("! MANCA ACQUA !     ");
+      else lcd.print("Sistema Regolare    ");
+    }
+  } 
+  else if (statoAttuale == MENU_PRINCIPALE) {
+    lcd.setCursor(0, 0); lcd.print("--- MENU ---");
+    if (cursoreMenu <= 3) {
+      lcd.setCursor(0, 1); lcd.print(cursoreMenu == 1 ? "-> 1. Imposta Dosi " : "   1. Imposta Dosi ");
+      lcd.setCursor(0, 2); lcd.print(cursoreMenu == 2 ? "-> 2. Timer Pasto  " : "   2. Timer Pasto  ");
+      lcd.setCursor(0, 3); lcd.print(cursoreMenu == 3 ? "-> 3. Eroga Manuale" : "   3. Eroga Manuale");
+    } else {
+      lcd.setCursor(0, 1); lcd.print("   2. Timer Pasto  ");
+      lcd.setCursor(0, 2); lcd.print("   3. Eroga Manuale");
+      lcd.setCursor(0, 3); lcd.print("-> 4. Info Sensori ");
+    }
+  }
+  else if (statoAttuale == MENU_SET_DOSI) {
+    lcd.setCursor(0, 0); lcd.print("- IMPOSTA DOSI -");
+    lcd.setCursor(0, 1); lcd.print("Dosi attuali: "); lcd.print(dosiDaErogare); lcd.print("  ");
+    lcd.setCursor(0, 3); lcd.print("CONFIRM=Salva");
+  }
+  else if (statoAttuale == MENU_SET_TIMER) {
+    lcd.setCursor(0, 0); lcd.print("- IMPOSTA TIMER -");
+    lcd.setCursor(0, 1); lcd.print("Pasto: 1 ogni "); lcd.print(oreIntervallo); lcd.print("h  ");
+    lcd.setCursor(0, 3); lcd.print("CONFIRM=Salva");
+  }
+  else if (statoAttuale == MENU_MANUALE) {
+    lcd.setCursor(0, 0); lcd.print("- MENU MANUALE -");
+    lcd.setCursor(0, 1); lcd.print("Premi SU: Cibo");
+    lcd.setCursor(0, 3); lcd.print("Premi BACK: Esci");
+  }
+  else if (statoAttuale == MENU_DEBUG) {
+    float distCiotola = leggiSonar(PIN_TRIG_CIOTOLA, PIN_ECHO_CIOTOLA);
+    float distSerbatoio = leggiSonar(PIN_TRIG_SERBATOIO, PIN_ECHO_SERBATOIO);
+    lcd.setCursor(0, 0); lcd.print("- LETTURA SENSORI -");
+    lcd.setCursor(0, 1); lcd.print("Ciotola: "); lcd.print(distCiotola, 1); lcd.print("cm   ");
+    lcd.setCursor(0, 2); lcd.print("Serbat.: "); lcd.print(distSerbatoio, 1); lcd.print("cm   ");
+    lcd.setCursor(0, 3); lcd.print("BACK x Uscire");
+  }
+}
 
 
 
